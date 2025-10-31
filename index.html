@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Workshop Playground</title>
+    <!-- Load Tailwind CSS from CDN for easy single-file styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font family -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .container-shadow {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        }
+        .loading-dot {
+            animation: bounce 1.4s infinite ease-in-out both;
+            background-color: #3b82f6;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin: 0 4px;
+        }
+        .loading-dot:nth-child(1) { animation-delay: -0.32s; }
+        .loading-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1.0); }
+        }
+        /* Custom scrollbar for text areas */
+        textarea::-webkit-scrollbar, #resultContainer::-webkit-scrollbar {
+            width: 6px;
+        }
+        textarea::-webkit-scrollbar-thumb, #resultContainer::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-10">
+            <h1 class="text-3xl md:text-4xl font-extrabold text-gray-900 mb-2">
+                <span class="text-blue-600">Gemini</span> API Playground
+            </h1>
+            <p class="text-gray-500">Your single-file, responsive interface for the AI Workshop.</p>
+        </header>
+
+        <div id="appContainer" class="bg-white p-6 md:p-8 rounded-xl container-shadow mb-8">
+
+            <!-- API Key Input -->
+            <div class="mb-6">
+                <label for="apiKey" class="block text-sm font-medium text-gray-700 mb-1">1. Gemini API Key</label>
+                <input type="password" id="apiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="Paste your API Key here (starts with AIza...)" onchange="saveSetting('geminiApiKey', this.value)">
+                <p class="text-xs text-gray-500 mt-1">This key is saved locally in your browser only.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- System Instruction Input -->
+                <div class="mb-4">
+                    <label for="systemInstruction" class="block text-sm font-medium text-gray-700 mb-1">2. System Instruction (The Persona)</label>
+                    <textarea id="systemInstruction" rows="5" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm resize-none" placeholder="e.g., You are a witty, slightly sarcastic campus student..." onchange="saveSetting('systemInstruction', this.value)"></textarea>
+                    <p class="text-xs text-gray-500 mt-1">Defines the AI's role and tone for the conversation.</p>
+                </div>
+
+                <!-- User Prompt Input -->
+                <div class="mb-4">
+                    <label for="userPrompt" class="block text-sm font-medium text-gray-700 mb-1">3. User Prompt (The Query)</label>
+                    <textarea id="userPrompt" rows="5" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm resize-none" placeholder="e.g., Write three 25-word Instagram captions about the workshop."></textarea>
+                    <p class="text-xs text-gray-500 mt-1">The specific task you want the AI to perform (Use the TCPF framework!).</p>
+                </div>
+            </div>
+            
+            <!-- Generate Button -->
+            <button id="generateButton" onclick="generateContent()" class="w-full md:w-auto mt-4 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition duration-150 ease-in-out shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                Generate Content
+            </button>
+
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" class="hidden mt-6 flex items-center justify-center text-blue-600">
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+                <span class="ml-3 text-sm font-medium">Generating response...</span>
+            </div>
+        </div>
+
+        <!-- Result Area -->
+        <div class="bg-white p-6 md:p-8 rounded-xl container-shadow">
+            <h2 class="text-xl font-bold text-gray-900 mb-4 flex items-center">
+                AI Response
+            </h2>
+            <div id="resultContainer" class="min-h-[150px] p-4 bg-gray-50 border border-gray-200 rounded-lg whitespace-pre-wrap text-gray-800 text-sm overflow-y-auto">
+                Your generated content will appear here.
+            </div>
+            <div id="errorDisplay" class="hidden mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-sm" role="alert"></div>
+        </div>
+    </div>
+
+    <!-- Firebase and Application Logic -->
+    <script type="module">
+        // Mandatory Firebase imports for the execution environment
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global environment variables provided by the Canvas
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth;
+        let userId = null;
+
+        // Function to initialize Firebase and authenticate the user (MANDATORY SETUP)
+        async function setupAuth() {
+            if (!firebaseConfig) {
+                console.warn("Firebase configuration not found. Skipping Firestore/Auth initialization.");
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug'); 
+                console.log("Firebase initialized. App ID:", appId);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Signed in with Custom Token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
+                }
+
+                userId = auth.currentUser?.uid || crypto.randomUUID();
+                console.log("Current User ID:", userId);
+
+            } catch (error) {
+                console.error("Firebase Initialization/Auth Error:", error);
+            }
+        }
+        
+        // --- End of Mandatory Firebase Setup ---
+
+        /**
+         * Saves a setting to localStorage.
+         * @param {string} key - The localStorage key.
+         * @param {string} value - The value to save.
+         */
+        window.saveSetting = (key, value) => {
+            localStorage.setItem(key, value);
+        }
+
+        /**
+         * Displays the result or error message.
+         * @param {string} text - The content to display.
+         * @param {boolean} isError - If true, displays as an error.
+         */
+        function displayResult(text, isError = false) {
+            const resultContainer = document.getElementById('resultContainer');
+            const errorDisplay = document.getElementById('errorDisplay');
+            
+            if (isError) {
+                errorDisplay.textContent = text;
+                errorDisplay.classList.remove('hidden');
+                resultContainer.textContent = "Error: See above message.";
+                resultContainer.classList.add('hidden');
+            } else {
+                resultContainer.textContent = text;
+                resultContainer.classList.remove('hidden');
+                errorDisplay.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Main function to call the Gemini API with exponential backoff.
+         */
+        window.generateContent = async () => {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const systemPrompt = document.getElementById('systemInstruction').value.trim();
+            const userQuery = document.getElementById('userPrompt').value.trim();
+
+            if (!apiKey) {
+                return displayResult("Please enter your Gemini API Key.", true);
+            }
+            if (!userQuery) {
+                return displayResult("Please enter a User Prompt (query).", true);
+            }
+
+            const generateButton = document.getElementById('generateButton');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            
+            // UI State: Loading
+            generateButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            displayResult("Waiting for response...", false);
+
+            const maxRetries = 5;
+            let retryCount = 0;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+
+            while (retryCount < maxRetries) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429 || response.status >= 500) {
+                        // Rate limit or server error - implement backoff
+                        throw new Error(`API Error: Status ${response.status}. Retrying...`);
+                    }
+
+                    const result = await response.json();
+                    
+                    if (result.error) {
+                        // Handle explicit API errors (e.g., invalid key, safety blocking)
+                        throw new Error(`API Error: ${result.error.message || 'Unknown API error'}`);
+                    }
+
+                    const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    // UI State: Success
+                    if (generatedText) {
+                        displayResult(generatedText, false);
+                    } else {
+                        displayResult("The model returned an empty response. It might be blocked by safety filters or an internal issue.", true);
+                    }
+                    
+                    break; // Success, exit loop
+
+                } catch (error) {
+                    retryCount++;
+                    if (retryCount >= maxRetries) {
+                        // UI State: Final Error
+                        displayResult(`Failed to generate content after ${maxRetries} attempts. Error: ${error.message}`, true);
+                        break; // Max retries reached
+                    }
+
+                    const delay = Math.pow(2, retryCount) * 1000 + Math.random() * 1000; // Exponential backoff
+                    console.warn(`Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+
+            // UI State: Complete
+            generateButton.disabled = false;
+            loadingIndicator.classList.add('hidden');
+        };
+
+        // Initialize on page load
+        window.onload = () => {
+            setupAuth();
+            
+            // Load persisted data from localStorage
+            document.getElementById('apiKey').value = localStorage.getItem('geminiApiKey') || '';
+            document.getElementById('systemInstruction').value = localStorage.getItem('systemInstruction') || 'You are a friendly, witty, and slightly sarcastic campus student specializing in quick-turnaround social media content.';
+        };
+    </script>
+</body>
+</html>
